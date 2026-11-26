@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phone Agent</string>
+    <string name="a11y_description">מאפשר ל-Claude לראות את המסך ולבצע הקשות, החלקות והקלדה כדי לבצע משימות שאתם נותנים לו. הסוכן פועל רק כשאתם מפעילים משימה מתוך האפליקציה, ואפשר לעצור אותו בכל רגע מהכפתור הצף.</string>
+</resources>
