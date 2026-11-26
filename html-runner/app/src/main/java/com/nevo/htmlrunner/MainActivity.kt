@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -13,6 +15,9 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -45,7 +50,11 @@ class MainActivity : AppCompatActivity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = false
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView, request: WebResourceRequest
+                ): WebResourceResponse? = cdnCached(request) ?: super.shouldInterceptRequest(view, request)
+            }
             webChromeClient = WebChromeClient()
         }
 
@@ -64,7 +73,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHtml(html: String) {
-        // https base URL => the page can fetch from CDNs (Pyodide) like in a normal browser
         web.loadDataWithBaseURL("https://appassets.local/", html, "text/html", "utf-8", null)
     }
 
@@ -79,6 +87,36 @@ class MainActivity : AppCompatActivity() {
             showHtml(html)
         } catch (e: Exception) {
             Toast.makeText(this, "לא הצלחתי לפתוח: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Downloads files from cdn.jsdelivr.net natively, caches them on the phone
+    // (so later runs work offline) and serves them to the page with CORS allowed.
+    private fun cdnCached(request: WebResourceRequest): WebResourceResponse? {
+        val url = request.url
+        if (url.host != "cdn.jsdelivr.net") return null
+        return try {
+            val name = url.lastPathSegment ?: "file"
+            val f = File(filesDir, "cdn/" + Integer.toHexString(url.toString().hashCode()) + "_" + name)
+            if (!f.exists()) {
+                f.parentFile?.mkdirs()
+                val tmp = File(f.path + ".tmp")
+                val conn = URL(url.toString()).openConnection() as HttpURLConnection
+                conn.connectTimeout = 15000
+                conn.readTimeout = 60000
+                conn.inputStream.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+                tmp.renameTo(f)
+            }
+            val mime = when {
+                name.endsWith(".js") -> "text/javascript"
+                name.endsWith(".wasm") -> "application/wasm"
+                name.endsWith(".json") -> "application/json"
+                name.endsWith(".zip") -> "application/zip"
+                else -> "application/octet-stream"
+            }
+            WebResourceResponse(mime, null, 200, "OK", mapOf("Access-Control-Allow-Origin" to "*"), f.inputStream())
+        } catch (e: Exception) {
+            null
         }
     }
 }
