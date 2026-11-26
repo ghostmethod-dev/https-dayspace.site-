@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מריץ פייתון</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --border: #2a2f3a;
+    --text: #e8eaf0;
+    --muted: #8b93a5;
+    --accent: #4ade80;
+    --accent-text: #06260f;
+    --error: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    font-size: 18px;
+    line-height: 1.5;
+    padding: 16px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; margin: 4px 0 14px; }
+  label { display: block; color: var(--muted); font-size: 15px; margin: 14px 0 6px; }
+  .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+    font-size: 18px;
+    line-height: 1.55;
+    direction: ltr;
+    text-align: left;
+    unicode-bidi: plaintext;
+  }
+  textarea, .out {
+    width: 100%;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  textarea { resize: vertical; outline: none; tab-size: 4; }
+  textarea:focus { border-color: var(--accent); }
+  #code { min-height: 260px; }
+  #stdin { min-height: 64px; }
+  button {
+    width: 100%;
+    margin-top: 14px;
+    padding: 16px;
+    font-size: 20px;
+    font-weight: 700;
+    border: 0;
+    border-radius: 12px;
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .out {
+    min-height: 140px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    margin: 0;
+  }
+  .out .err { color: var(--error); }
+  .status { color: var(--muted); font-size: 15px; margin-top: 6px; min-height: 22px; }
+</style>
+</head>
+<body>
+  <h1>מריץ פייתון</h1>
+
+  <label for="code">הקוד שלך</label>
+  <textarea id="code" class="mono" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-gramm="false" placeholder="# כתוב כאן קוד פייתון">print("שלום עולם")</textarea>
+
+  <label for="stdin">קלט ל-input() (שורה לכל קריאה, לא חובה)</label>
+  <textarea id="stdin" class="mono" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-gramm="false"></textarea>
+
+  <button id="run" disabled>טוען פייתון…</button>
+  <div class="status" id="status"></div>
+
+  <pre id="log" class="mono" style="display:none;font-size:13px;color:#8b93a5;white-space:pre-wrap;margin:8px 0 0"></pre>
+
+  <label>פלט</label>
+  <pre class="out mono" id="out" dir="auto"></pre>
+
+<script>
+(function () {
+  var codeEl = document.getElementById('code');
+  var stdinEl = document.getElementById('stdin');
+  var runBtn = document.getElementById('run');
+  var outEl = document.getElementById('out');
+  var statusEl = document.getElementById('status');
+  var pyodide = null;
+  var inputLines = [];
+
+  function append(text, isErr) {
+    var span = document.createElement('span');
+    if (isErr) span.className = 'err';
+    span.textContent = text;
+    outEl.appendChild(span);
+  }
+
+  // Tab inserts 4 spaces (no autocomplete / no hints)
+  codeEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      var s = codeEl.selectionStart, en = codeEl.selectionEnd;
+      codeEl.value = codeEl.value.slice(0, s) + '    ' + codeEl.value.slice(en);
+      codeEl.selectionStart = codeEl.selectionEnd = s + 4;
+    }
+  });
+
+  var BASE = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
+  var logEl = document.getElementById('log');
+  function log(m) {
+    logEl.style.display = 'block';
+    logEl.textContent += m + '\n';
+  }
+  document.addEventListener('securitypolicyviolation', function (e) {
+    log('חסום ע"י CSP: ' + e.blockedURI + ' (' + e.violatedDirective + ')');
+  });
+  window.addEventListener('error', function (e) {
+    log('שגיאת דף: ' + (e.message || e.filename || ''));
+  });
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('טעינת הסקריפט נכשלה: ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function init() {
+    var t0 = Date.now();
+    var slow = setTimeout(function () { log('עדיין טוען… (' + Math.round((Date.now() - t0) / 1000) + ' שניות)'); }, 15000);
+    try {
+      log('1/3 טוען pyodide.js');
+      await loadScript(BASE + 'pyodide.js');
+      if (typeof loadPyodide !== 'function') throw new Error('loadPyodide לא קיים');
+      log('2/3 טוען את מנוע פייתון (wasm)');
+      pyodide = await loadPyodide({ indexURL: BASE });
+      log('3/3 מוכן ✓');
+      clearTimeout(slow);
+      pyodide.setStdout({ batched: function (s) { append(s + '\n'); } });
+      pyodide.setStderr({ batched: function (s) { append(s + '\n', true); } });
+      pyodide.setStdin({
+        stdin: function () {
+          return inputLines.length ? inputLines.shift() : undefined;
+        }
+      });
+      runBtn.disabled = false;
+      runBtn.textContent = 'הרץ ▶';
+    } catch (err) {
+      clearTimeout(slow);
+      log('שגיאה: ' + (err && err.message ? err.message : err));
+      runBtn.textContent = 'הטעינה נכשלה';
+      statusEl.textContent = 'לא הצלחתי לטעון את פייתון: ' + (err && err.message ? err.message : err);
+    }
+  }
+
+  async function run() {
+    if (!pyodide) return;
+    runBtn.disabled = true;
+    statusEl.textContent = 'רץ…';
+    outEl.textContent = '';
+    inputLines = stdinEl.value ? stdinEl.value.split('\n') : [];
+    // let the UI paint before running
+    await new Promise(function (r) { setTimeout(r, 30); });
+    try {
+      await pyodide.runPythonAsync(codeEl.value);
+      statusEl.textContent = 'הסתיים ✓';
+    } catch (err) {
+      var msg = String(err && err.message ? err.message : err).replace(/^Traceback[\s\S]*?(?=\n\s*File "<exec>")/, 'Traceback (most recent call last):');
+      append((outEl.textContent && !outEl.textContent.endsWith('\n') ? '\n' : '') + msg, true);
+      statusEl.textContent = 'הייתה שגיאה';
+    }
+    runBtn.disabled = false;
+  }
+
+  runBtn.addEventListener('click', run);
+  init();
+})();
+</script>
+</body>
+</html>

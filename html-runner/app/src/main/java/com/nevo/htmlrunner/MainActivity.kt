@@ -1,0 +1,84 @@
+package com.nevo.htmlrunner
+
+import android.net.Uri
+import android.os.Bundle
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var web: WebView
+
+    private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) loadFromUri(uri)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0F1115.toInt())
+        }
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val openBtn = Button(this).apply {
+            text = "פתח קובץ HTML"
+            setOnClickListener { picker.launch(arrayOf("text/html", "*/*")) }
+        }
+        val homeBtn = Button(this).apply {
+            text = "מריץ פייתון"
+            setOnClickListener { loadAsset() }
+        }
+        bar.addView(openBtn, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        bar.addView(homeBtn, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+
+        web = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = false
+            webViewClient = WebViewClient()
+            webChromeClient = WebChromeClient()
+        }
+
+        root.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        root.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        setContentView(root)
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (web.canGoBack()) web.goBack() else finish()
+            }
+        })
+
+        val data = intent?.data
+        if (data != null) loadFromUri(data) else loadAsset()
+    }
+
+    private fun showHtml(html: String) {
+        // https base URL => the page can fetch from CDNs (Pyodide) like in a normal browser
+        web.loadDataWithBaseURL("https://appassets.local/", html, "text/html", "utf-8", null)
+    }
+
+    private fun loadAsset() {
+        val html = assets.open("python-runner.html").bufferedReader().use { it.readText() }
+        showHtml(html)
+    }
+
+    private fun loadFromUri(uri: Uri) {
+        try {
+            val html = contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
+            showHtml(html)
+        } catch (e: Exception) {
+            Toast.makeText(this, "לא הצלחתי לפתוח: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+}
